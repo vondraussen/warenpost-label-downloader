@@ -5,9 +5,7 @@ This Python script reads emails from a Gmail account and looks for emails from '
 
 ## Requirements
 - Python 3.x
-- Google API Client Library
-- `python-cups` library
-- Additional dependencies listed in `requirements.txt`
+- Dependencies listed in `requirements.txt`
 
 ## Setup
 1. Clone or download this repository.

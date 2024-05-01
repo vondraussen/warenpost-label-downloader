@@ -28,9 +28,9 @@ def ask_for_print(filename):
 def print_pdf(filename):
     # Access the environment variables
     print_server_ip = os.getenv("CUPS_SERVER_IP", '127.0.0.1')
-    print_name = os.getenv("CUPS_PRINTER_NAME", 'QL1110')
+    printer_name = os.getenv("CUPS_PRINTER_NAME", 'QL1110')
 
-    command = f'lp -h {print_server_ip} -d {print_name} {filename}'
+    command = f'lp -h {print_server_ip} -d {printer_name} {filename}'
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
 

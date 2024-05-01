@@ -24,7 +24,6 @@ This Python script reads emails from a Gmail account and looks for emails from '
    - Create OAuth 2.0 credentials.
    - Download the credentials file (usually `client_secret.json`).
 5. Place the downloaded `client_secret.json` file in the same directory as the script.
-6. Modify the script to configure your Gmail account credentials using the \`InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)\` method.
 
 ## Usage
 1. Run the script:

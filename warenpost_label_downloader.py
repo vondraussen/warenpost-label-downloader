@@ -7,10 +7,11 @@ from google.oauth2.credentials import Credentials
 import base64
 import re
 import requests
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 import io
 import subprocess
 from dotenv import load_dotenv
+import argparse
 
 def ask_for_print(filename):
     question = 'Do you want to print this label?'
@@ -41,83 +42,117 @@ def print_pdf(filename):
         print(stderr.decode())
         exit(1)
 
-# Load environment variables from the .env file
-load_dotenv()
+def get_download_link(messages, service):
+    # Iterate through each email and find the internetmarke download link
+    for message in messages[0:100]:
+        msg = service.users().messages().get(userId='me', id=message['id']).execute()
+        for header in msg['payload']['headers']:
+            if header['name'] == 'From':
+                sender = header['value']
+                if sender == 'service-shop@deutschepost.de':
+                    message = msg['payload']['parts'][0]['parts'][1]['body']['data']
+                    message_text = base64.urlsafe_b64decode(message).decode('utf-8')
+                    # this will return the first message only! TODO: check all messages
+                    return message_text
+    return ''
 
-# Check if token.json file is present
-if not os.path.isfile('token.json'):
-    # Set up OAuth credentials
-    SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
-    flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
-    credentials = flow.run_local_server(port=0)
-    with open('token.json', 'w') as token:
-        token.write(credentials.to_json())
-else:
-    # Load existing credentials from token.json
-    with open('token.json', 'r') as token:
-        data = json.load(token)
-        credentials = Credentials('access_token',
-                                  refresh_token=data['refresh_token'],
-                                  token_uri=data['token_uri'],
-                                  client_id=data['client_id'],
-                                  client_secret=data['client_secret'])
+def get_pdf_stream(message_text):
+    """
+    Extract the download link from the email message and download the PDF file.
+    Retruns a BytesIO stream of the PDF file and a filename as a tuple.
+    """
+    url_pattern = r'href="(https://internetmarke\.deutschepost\.de/PcfExtensionWeb/document\?keyphase=[^"]+)"'
+    download_link = re.findall(url_pattern, message_text)[0]
 
-# Set up the Gmail API client
-service = build('gmail', 'v1', credentials=credentials)
-# Retrieve all emails from the account
-results = service.users().messages().list(userId='me').execute()
-messages = results.get('messages', [])
+    # download the PDF file
+    response = requests.get(download_link)
+    if response.status_code != 200:
+        print(f"Failed to download file from URL: {download_link}")
+        exit(1)
 
-message_text = ''
+    # Extract the filename from the URL
+    filename = download_link.split('/')[-1]
 
-# Iterate through each email and find the internetmarke download link
-for message in messages[0:10]:
-    msg = service.users().messages().get(userId='me', id=message['id']).execute()
-    for header in msg['payload']['headers']:
-        if header['name'] == 'From':
-            sender = header['value']
-            if sender == 'service-shop@deutschepost.de':
-                message = msg['payload']['parts'][0]['parts'][1]['body']['data']
-                message_text = base64.urlsafe_b64decode(message).decode('utf-8')
+    pdf_stream = io.BytesIO(response.content)
+    return (pdf_stream, filename)
 
-if message_text == '':
-    print('no messages found!')
-    exit(0)
+def main(args):
+    # Load environment variables from the .env file
+    load_dotenv()
 
-# Define the URL pattern
-url_pattern = r'href="(https://internetmarke\.deutschepost\.de/PcfExtensionWeb/document\?keyphase=[^"]+)"'
+    # Check if token.json file is present
+    if not os.path.isfile('token.json'):
+        # Set up OAuth credentials
+        SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+        flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
+        redirect_uri = os.getenv("GOOGLE_CLOUD_REDIRECT_URI", 'http://127.0.0.1:8080')
 
-# Search for the URL pattern in the decoded data
-matches = re.findall(url_pattern, message_text)
+        flow.redirect_uri = redirect_uri
+        auth_uri = flow.authorization_url(access_type='offline', include_granted_scopes='true')
+        print(auth_uri[0])
+        code = input('Enter the authorization code: ')
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
+        with open('token.json', 'w') as token:
+            token.write(credentials.to_json())
+    else:
+        # Load existing credentials from token.json
+        with open('token.json', 'r') as token:
+            data = json.load(token)
+            credentials = Credentials('access_token',
+                                    refresh_token=data['refresh_token'],
+                                    token_uri=data['token_uri'],
+                                    client_id=data['client_id'],
+                                    client_secret=data['client_secret'])
 
-# Print the matched URLs
-response = requests.get(matches[0])
-if response.status_code != 200:
-    print(f"Failed to download file from URL: {matches[0]}")
-    exit(1)
+    # Set up the Gmail API client
+    service = build('gmail', 'v1', credentials=credentials)
+    # Retrieve all emails from the account
+    results = service.users().messages().list(userId='me').execute()
+    messages = results.get('messages', [])
 
-# Extract the filename from the URL
-filename = matches[0].split('/')[-1]
+    message_text = get_download_link(messages, service)
+    if message_text == '':
+        print('no messages found!')
+        exit(0)
 
-pdf_stream = io.BytesIO(response.content)
-pdf_reader = PdfReader(pdf_stream)
+    pdf_stream, filename = get_pdf_stream(message_text)
+    pdf_reader = PdfReader(pdf_stream)
+    pdf_writer = PdfWriter()
 
-# Read the content of each page
-page = pdf_reader.pages[0]
-page_content = page.extract_text().split('\n')
+    # Read the content of each page
+    page = pdf_reader.pages[0]
+    page_content = page.extract_text().split('\n')
 
-# Do something with the page content
-trackingcode = page_content[0].replace(' ', '')
-reciepent = page_content[5].replace(' ', '_')
+    # Extract the tracking code and recipient name
+    trackingcode = page_content[0].replace(' ', '')
+    buewa = page_content[2].replace(' ', '')
+    if buewa.upper() == 'BÜWA':
+        reciepent = page_content[5].replace(' ', '_')
+    else:
+        # regular letter stamp
+        reciepent = page_content[4].replace(' ', '_')
 
-filename = f'Briefmarke_{reciepent}_{trackingcode}.pdf'
-# Check if the file is already downloaded
-if os.path.isfile(filename):
-    print(f'File {filename} is already downloaded!')
-else:
-    # Save the file
-    with open(filename, 'wb') as file:
-        file.write(response.content)
+    # Resize the PDF if the resize flag is set
+    if args.resize:
+        page.mediabox.top = page.mediabox.top - 50
+        page.mediabox.bottom = page.mediabox.bottom + 10
+        pdf_writer.add_page(page)
+        filename = f'Briefmarke_{reciepent}_{trackingcode}_resized.pdf'
+        with open(filename, 'wb') as file:
+            pdf_writer.write(file)
+    else:
+        filename = f'Briefmarke_{reciepent}_{trackingcode}.pdf'
+        with open(filename, 'wb') as file:
+            file.write(pdf_stream.getvalue())
+
     print(f"File '{filename}' downloaded successfully.")
 
-ask_for_print(filename)
+    ask_for_print(filename)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Warenpost Label Downloader')
+    parser.add_argument('-r', '--resize', action='store_true', help='Resize the PDF label to save paper')
+    args = parser.parse_args()
+
+    main(args)

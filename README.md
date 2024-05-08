@@ -16,6 +16,7 @@ This Python script reads emails from a Gmail account and looks for emails from '
 3. Set up the following environment variables:
    - `CUPS_SERVER_IP`: The IP address of your CUPS server.
    - `CUPS_PRINTER_NAME`: The name of your CUPS printer.
+   - `GOOGLE_CLOUD_REDIRECT_URI`: The Oauth2 redirect uri set in google api console
 4. Enable the Gmail API for your Google account:
    - Go to the [Google API Console](https://console.developers.google.com/).
    - Create a new project and enable the Gmail API.

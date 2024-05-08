@@ -76,34 +76,41 @@ def get_pdf_stream(message_text):
     pdf_stream = io.BytesIO(response.content)
     return (pdf_stream, filename)
 
+def get_credentials_from_google():
+    # Set up OAuth credentials
+    SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+    flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
+    redirect_uri = os.getenv("GOOGLE_CLOUD_REDIRECT_URI", 'http://127.0.0.1:8080')
+
+    flow.redirect_uri = redirect_uri
+    auth_uri = flow.authorization_url(access_type='offline', include_granted_scopes='true')
+    print(auth_uri[0])
+    code = input('Enter the authorization code: ')
+    credentials = flow.credentials(code=code)
+    with open('token.json', 'w') as token:
+        token.write(credentials.to_json())
+    return credentials
+
+def get_credentials_from_file():
+    with open('token.json', 'r') as file:
+        data = json.load(file)
+        credentials = Credentials('access_token',
+                                refresh_token=data['refresh_token'],
+                                token_uri=data['token_uri'],
+                                client_id=data['client_id'],
+                                client_secret=data['client_secret'])
+    return credentials
+
 def main(args):
-    # Load environment variables from the .env file
     load_dotenv()
 
-    # Check if token.json file is present
-    if not os.path.isfile('token.json'):
-        # Set up OAuth credentials
-        SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
-        flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
-        redirect_uri = os.getenv("GOOGLE_CLOUD_REDIRECT_URI", 'http://127.0.0.1:8080')
-
-        flow.redirect_uri = redirect_uri
-        auth_uri = flow.authorization_url(access_type='offline', include_granted_scopes='true')
-        print(auth_uri[0])
-        code = input('Enter the authorization code: ')
-        flow.fetch_token(code=code)
-        credentials = flow.credentials
-        with open('token.json', 'w') as token:
-            token.write(credentials.to_json())
+    if os.path.isfile('token.json'):
+        credentials = get_credentials_from_file()
     else:
-        # Load existing credentials from token.json
-        with open('token.json', 'r') as token:
-            data = json.load(token)
-            credentials = Credentials('access_token',
-                                    refresh_token=data['refresh_token'],
-                                    token_uri=data['token_uri'],
-                                    client_id=data['client_id'],
-                                    client_secret=data['client_secret'])
+        credentials = get_credentials_from_google()
+
+    if not credentials.valid:
+        credentials = get_credentials_from_google()
 
     # Set up the Gmail API client
     service = build('gmail', 'v1', credentials=credentials)
